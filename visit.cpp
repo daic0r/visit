@@ -37,16 +37,16 @@ namespace ice {
         } 
         */       
 
-        template<typename Callable, typename... VarTypes, std::size_t... Is>
+        template<typename Callable, typename... VarTypes, std::size_t... Is, typename ForwardedCallable = std::add_rvalue_reference_t<Callable>>
         static constexpr decltype(auto) visit(Callable&& f, std::variant<VarTypes...>& v, std::index_sequence<Is...>)
-            noexcept((std::is_nothrow_invocable_v<Callable, std::add_lvalue_reference_t<VarTypes>> && ...))
+            noexcept((std::is_nothrow_invocable_v<ForwardedCallable, std::add_lvalue_reference_t<VarTypes>> && ...))
         {
             using ForwardedType = decltype(std::forward<Callable>(f));
             using LambdaType = common_return_type_t<Callable, VarTypes...>(*)(ForwardedType, std::variant<VarTypes...>&);
 
             constexpr std::array<LambdaType, sizeof...(VarTypes)> funcs = { 
                 +[](ForwardedType f, std::variant<VarTypes...>& var) {
-                    return f(std::get<Is>(var));
+                    return std::forward<ForwardedType>(f)(std::get<Is>(var));
                 }...
             };
 
@@ -57,10 +57,10 @@ namespace ice {
    }
 
     /* The actual visit function */
-    template<typename Callable, typename... VarTypes>
+    template<typename Callable, typename... VarTypes, typename ForwardedCallable = std::add_rvalue_reference_t<Callable>>
     requires detail::SameReturnTypeCallables<Callable, VarTypes...>
-    constexpr decltype(auto) visit(Callable&& func, std::variant<VarTypes...>& v) noexcept((std::is_nothrow_invocable_v<Callable, std::add_lvalue_reference_t<VarTypes>> && ...)) {
-         return detail::visit(std::forward<Callable>(func), v, std::make_index_sequence<sizeof...(VarTypes)>{});
+    constexpr decltype(auto) visit(Callable&& func, std::variant<VarTypes...>& v) noexcept((std::is_nothrow_invocable_v<ForwardedCallable, std::add_lvalue_reference_t<VarTypes>> && ...)) {
+        return detail::visit(std::forward<Callable>(func), v, std::make_index_sequence<sizeof...(VarTypes)>{});
     }
 }
 
@@ -75,20 +75,20 @@ int main() {
     std::variant<int, float, double, std::string> v{};
 
     auto vis1 = visitor {
-        [](int const& s) {
+        [](int const& s) noexcept {
             std::cout << "Int: " << s << "\n";
             return std::string{ "int" };
         }, 
-        [](float const& s) {
+        [](float const& s) noexcept {
             std::cout << "Float: " << s << "\n";
             return std::string{ "float" };
         },
-        [](double& s) {
+        [](double& s) noexcept {
             std::cout << "Double: " << s << "\n";
             s *= 2;
             return std::string{ "double" };
         },
-        [](const std::string& s) {
+        [](const std::string& s) noexcept {
             std::cout << "String: " << s << "\n";
             return std::string{ "std::string" };
         }
