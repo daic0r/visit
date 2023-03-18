@@ -30,10 +30,18 @@ namespace ice {
  
         /* Internal function to find the correct type contained in the variant */
         /****************************************************************/
-        template<typename Callable, typename... VarTypes, std::size_t... Is>
-        static decltype(auto) visit(Callable&& f, std::variant<VarTypes...>& v, std::index_sequence<Is...>) {
-            using ForwardedType = decltype(std::forward<Callable>(f));
+        /*
+        template<std::size_t I, typename F, typename... VarTypes>
+        static decltype(auto) call_impl(F f, std::variant<VarTypes...>& v) noexcept(std::is_nothrow_invocable_v<F, std::add_lvalue_reference_t<std::variant_alternative_t<I, std::variant<VarTypes...>>>>) {
+            return f(std::get<I>(v));
+        } 
+        */       
 
+        template<typename Callable, typename... VarTypes, std::size_t... Is>
+        static constexpr decltype(auto) visit(Callable&& f, std::variant<VarTypes...>& v, std::index_sequence<Is...>)
+            noexcept((std::is_nothrow_invocable_v<Callable, std::add_lvalue_reference_t<VarTypes>> && ...))
+        {
+            using ForwardedType = decltype(std::forward<Callable>(f));
             using LambdaType = common_return_type_t<Callable, VarTypes...>(*)(ForwardedType, std::variant<VarTypes...>&);
 
             constexpr std::array<LambdaType, sizeof...(VarTypes)> funcs = { 
@@ -51,7 +59,7 @@ namespace ice {
     /* The actual visit function */
     template<typename Callable, typename... VarTypes>
     requires detail::SameReturnTypeCallables<Callable, VarTypes...>
-    decltype(auto) visit(Callable&& func, std::variant<VarTypes...>& v) {
+    constexpr decltype(auto) visit(Callable&& func, std::variant<VarTypes...>& v) noexcept((std::is_nothrow_invocable_v<Callable, std::add_lvalue_reference_t<VarTypes>> && ...)) {
          return detail::visit(std::forward<Callable>(func), v, std::make_index_sequence<sizeof...(VarTypes)>{});
     }
 }
@@ -103,25 +111,7 @@ int main() {
                 break;
         }
 
-        auto ret = ice::visit(visitor {
-        [](int const& s) {
-            std::cout << "Int: " << s << "\n";
-            return std::string{ "int" };
-        }, 
-        [](float const& s) {
-            std::cout << "Float: " << s << "\n";
-            return std::string{ "float" };
-        },
-        [](double& s) {
-            std::cout << "Double: " << s << "\n";
-            s *= 2;
-            return std::string{ "double" };
-        },
-        [](const std::string& s) {
-            std::cout << "String: " << s << "\n";
-            return std::string{ "std::string" };
-        }
-    }, v);
+        auto ret = ice::visit(vis1, v);
         if (i == 2)
             std::cout << "Double is " << std::get<double>(v) << " now\n";
         
