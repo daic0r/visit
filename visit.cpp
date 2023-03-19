@@ -54,6 +54,15 @@ namespace ice {
         template<typename Callable, typename T>
         static inline constexpr auto are_all_nothrow_invocable_v = are_all_nothrow_invocable<Callable, T>::value;
 
+        template<typename T, template<typename...> typename Temp>
+        struct is_specialization_of : std::false_type {};
+
+        template<template<typename...> typename Temp, typename... Args>
+        struct is_specialization_of<Temp<Args...>, Temp> : std::true_type {};
+
+        template<typename T, template<typename...> typename Temp>
+        static inline constexpr auto is_specialization_of_v = is_specialization_of<T, Temp>::value;
+
         /* Internal function to find the correct type contained in the variant */
         /****************************************************************/
         /*
@@ -89,7 +98,7 @@ namespace ice {
     constexpr decltype(auto) visit(Callable&& func, Variant&& v) 
         noexcept(detail::are_all_nothrow_invocable_v<Callable, PureVariant>)
     {
-
+        static_assert(detail::is_specialization_of_v<PureVariant, std::variant>, "ice::visit can only be called with instantiations of std::variant");
         return detail::visit(std::forward<Callable>(func), std::forward<Variant>(v), std::make_index_sequence<detail::param_counter_v<PureVariant>>{});
     }
 
@@ -157,8 +166,8 @@ int main() {
     std::string s;
 
     auto& val = ice::visit(visitor{ 
-        [&s](int i) -> std::string& { return s; },
-        [&s](double f) -> std::string& { return s; } 
+        [&s](int i) -> decltype(auto) { return (s); },
+        [&s](double f) -> decltype(auto) { return (s); } 
     }, var);
 
     val = "hallo";
