@@ -11,23 +11,49 @@ namespace ice {
         /* Type trait to check if callables have the same return type and */
         /* to get that return type                                        */
         /****************************************************************/
-        template<typename Callable, typename T, typename... Ts>
-        struct has_same_return_type { 
-            using return_type = std::invoke_result_t<Callable, T>;
+        template<typename Callable, typename T>
+        struct has_same_return_type;
 
-            static constexpr auto value = (std::is_same_v<std::invoke_result_t<Callable, std::add_lvalue_reference_t<T>>, std::invoke_result_t<Callable, std::add_lvalue_reference_t<Ts>>> && ...);
+        template<typename Callable, typename... Ts>
+        struct has_same_return_type<Callable, std::variant<Ts...>> { 
+            using return_type = std::invoke_result_t<Callable, std::tuple_element_t<0, std::tuple<Ts...>>>;
+
+            static constexpr auto value = (std::is_same_v<std::invoke_result_t<Callable, std::add_lvalue_reference_t<return_type>>, std::invoke_result_t<Callable, std::add_lvalue_reference_t<Ts>>> && ...);
         };
 
-        template<typename Callable, typename... Ts>
-        inline constexpr bool has_same_return_type_v = has_same_return_type<Callable, Ts...>::value;
+        template<typename Callable, typename T>
+        static inline constexpr auto has_same_return_type_v = has_same_return_type<Callable, T>::value;
 
-        template<typename Callable, typename... Ts>
-        using common_return_type_t = typename has_same_return_type<Callable, Ts...>::return_type;
+        template<typename Callable, typename T>
+        using common_return_type_t = typename has_same_return_type<Callable, T>::return_type;
         /****************************************************************/
 
+        template<typename Callable, typename T>
+        concept SameReturnTypeCallables = has_same_return_type_v<Callable, T>;
+
+        template<typename T>
+        struct param_counter;
+
+        template<typename... Args>
+        struct param_counter<std::variant<Args...>> {
+            static constexpr auto value = sizeof...(Args);
+        };
+
+        template<typename T>
+        static inline constexpr auto param_counter_v = param_counter<T>::value;
+
+
+        template<typename Callable, typename T>
+        struct are_all_nothrow_invocable;
+
         template<typename Callable, typename... Ts>
-        concept SameReturnTypeCallables = has_same_return_type_v<Callable, Ts...>;
- 
+        struct are_all_nothrow_invocable<Callable, std::variant<Ts...>> { 
+            static constexpr auto value = (std::is_nothrow_invocable_v<Callable, std::add_lvalue_reference_t<Ts>> && ...);
+        };
+
+        template<typename Callable, typename T>
+        static inline constexpr auto are_all_nothrow_invocable_v = are_all_nothrow_invocable<Callable, T>::value;
+
         /* Internal function to find the correct type contained in the variant */
         /****************************************************************/
         /*
@@ -37,31 +63,36 @@ namespace ice {
         } 
         */       
 
-        template<typename Callable, typename... VarTypes, std::size_t... Is, typename ForwardedCallable = std::add_rvalue_reference_t<Callable>>
-        static constexpr decltype(auto) visit(Callable&& f, std::variant<VarTypes...>& v, std::index_sequence<Is...>)
-            noexcept((std::is_nothrow_invocable_v<ForwardedCallable, std::add_lvalue_reference_t<VarTypes>> && ...))
+        template<typename Callable, typename Variant, std::size_t... Is, typename PureVariant = std::remove_cvref_t<Variant>>
+        static constexpr decltype(auto) visit(Callable&& f, Variant&& v, std::index_sequence<Is...>)
+            noexcept(are_all_nothrow_invocable_v<Callable, PureVariant>)
         {
             using ForwardedType = decltype(std::forward<Callable>(f));
-            using LambdaType = common_return_type_t<Callable, VarTypes...>(*)(ForwardedType, std::variant<VarTypes...>&);
+            using ForwardVariantType = decltype(std::forward<Variant>(v));
+            using LambdaType = common_return_type_t<Callable, PureVariant>(*)(ForwardedType, ForwardVariantType);
 
-            constexpr std::array<LambdaType, sizeof...(VarTypes)> funcs = { 
-                +[](ForwardedType f, std::variant<VarTypes...>& var) {
-                    return std::forward<ForwardedType>(f)(std::get<Is>(var));
+            constexpr std::array<LambdaType, param_counter_v<PureVariant>> funcs = { 
+                +[](ForwardedType f, ForwardVariantType var) {
+                    return std::forward<ForwardedType>(f)(std::get<Is>(std::forward<ForwardVariantType>(var)));
                 }...
             };
 
-            return funcs[v.index()](std::forward<Callable>(f), v);
+            return funcs[v.index()](std::forward<Callable>(f), std::forward<ForwardVariantType>(v));
         }
         /****************************************************************/
 
    }
 
     /* The actual visit function */
-    template<typename Callable, typename... VarTypes, typename ForwardedCallable = std::add_rvalue_reference_t<Callable>>
-    requires detail::SameReturnTypeCallables<Callable, VarTypes...>
-    constexpr decltype(auto) visit(Callable&& func, std::variant<VarTypes...>& v) noexcept((std::is_nothrow_invocable_v<ForwardedCallable, std::add_lvalue_reference_t<VarTypes>> && ...)) {
-        return detail::visit(std::forward<Callable>(func), v, std::make_index_sequence<sizeof...(VarTypes)>{});
+    template<typename Callable, typename Variant, typename PureVariant = std::remove_cvref_t<Variant>>
+    requires detail::SameReturnTypeCallables<Callable, PureVariant>
+    constexpr decltype(auto) visit(Callable&& func, Variant&& v) 
+        noexcept(detail::are_all_nothrow_invocable_v<Callable, PureVariant>)
+    {
+
+        return detail::visit(std::forward<Callable>(func), std::forward<Variant>(v), std::make_index_sequence<detail::param_counter_v<PureVariant>>{});
     }
+
 }
 
 template<typename... Ts>
@@ -74,12 +105,12 @@ int main() {
 
     std::variant<int, float, double, std::string> v{};
 
-    auto vis1 = visitor {
-        [](int const& s) noexcept {
+    constexpr auto vis1 = visitor {
+        [](int s) noexcept {
             std::cout << "Int: " << s << "\n";
             return std::string{ "int" };
         }, 
-        [](float const& s) noexcept {
+        [](float s) noexcept {
             std::cout << "Float: " << s << "\n";
             return std::string{ "float" };
         },
@@ -117,6 +148,10 @@ int main() {
         
         std::cout << "Return: " << ret << '\n';
     }
+
+    constexpr std::variant<int, double> var{1};
+
+    constexpr auto val = ice::visit(visitor{ [](int i) { return i*2; }}, var);
 
     return 0;
 }
