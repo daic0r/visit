@@ -18,7 +18,7 @@ namespace ice {
         struct has_same_return_type<Callable, std::variant<Ts...>> { 
             using return_type = std::invoke_result_t<Callable, std::tuple_element_t<0, std::tuple<Ts...>>>;
 
-            static constexpr auto value = (std::is_same_v<std::invoke_result_t<Callable, std::add_lvalue_reference_t<return_type>>, std::invoke_result_t<Callable, std::add_lvalue_reference_t<Ts>>> && ...);
+            static constexpr auto value = (std::is_same_v<std::invoke_result_t<Callable, std::add_lvalue_reference_t<std::tuple_element_t<0, std::tuple<Ts...>>>>, std::invoke_result_t<Callable, std::add_lvalue_reference_t<Ts>>> && ...);
         };
 
         template<typename Callable, typename T>
@@ -154,7 +154,15 @@ int main() {
 
     constexpr std::variant<int, double> var{1};
 
-    constexpr auto val = ice::visit(visitor{ [](int i) { return i*2; }}, var);
+    std::string s;
+
+    auto& val = ice::visit(visitor{ 
+        [&s](int i) -> std::string& { return s; },
+        [&s](double f) -> std::string& { return s; } 
+    }, var);
+
+    val = "hallo";
+    std::cout << s << std::endl;
 
     return 0;
 }
