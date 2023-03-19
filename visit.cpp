@@ -72,7 +72,7 @@ namespace ice {
             using LambdaType = common_return_type_t<Callable, PureVariant>(*)(ForwardedType, ForwardVariantType);
 
             constexpr std::array<LambdaType, param_counter_v<PureVariant>> funcs = { 
-                +[](ForwardedType f, ForwardVariantType var) {
+                +[](ForwardedType f, ForwardVariantType var) -> decltype(auto) {
                     return std::forward<ForwardedType>(f)(std::get<Is>(std::forward<ForwardVariantType>(var)));
                 }...
             };
@@ -99,6 +99,9 @@ template<typename... Ts>
 struct visitor : Ts... { using Ts::operator()...; };
 template<typename... Ts>
 visitor(Ts...) -> visitor<Ts...>;
+
+
+void f(int) noexcept;
 
 int main() {
     std::cout << "ice::visit\n\n";
